@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  pdf2image_api:
+    image: pdf2image_api:latest
+    build:
+      context: .
+    networks:
+      - network_public
+    volumes:
+      - pdf2image-data:/data
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.pdf2image_api.rule=Host(`ocr.seudominio.com.br`)
+        - traefik.http.routers.pdf2image_api.entrypoints=websecure
+        - traefik.http.routers.pdf2image_api.tls.certresolver=letsencryptresolver
+        - traefik.http.services.pdf2image_api.loadbalancer.server.port=5000
+
+networks:
+  network_public:
+    external: true
+
+volumes:
+  pdf2image-data:
+    external: false
