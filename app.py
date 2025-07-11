@@ -9,7 +9,7 @@ from PIL import Image
 
 app = FastAPI()
 
-OUTPUT_DIR = "/data/output"
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "/tmp/output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def convert_from_bytes_pdfium(data: bytes, dpi: int = 200):
@@ -37,31 +37,26 @@ def healthcheck():
     return {"status": "ok"}
 
 @app.post("/convert")
-async def convert_pdf(file: UploadFile = File(...)):
-    # Validación sencilla de extensión
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="El archivo debe ser PDF")
-
+async def convert_pdf(…):
     content = await file.read()
-
-    # Convertimos con PDFium
-    try:
-        images = convert_from_bytes_pdfium(content, dpi=150)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al convertir PDF: {e}")
-
-    # Guardamos cada página
+    pdf = pdfium.PdfDocument(data=content)
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(OUTPUT_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
-
     urls = []
-    for i, img in enumerate(images, start=1):
-        filename = f"page_{i}.png"
+
+    for i in range(len(pdf)):
+        page = pdf.get_page(i)
+        pil_img = page.render_topil(scale=150/72, anti_alias=True)
+        filename = f"page_{i+1}.png"
         path = os.path.join(session_dir, filename)
-        img.save(path, format="PNG")
+        pil_img.save(path, "PNG")
+        # liberamos todo inmediatamente
+        pil_img.close()
+        page.close()
         urls.append(f"/download/{session_id}/{filename}")
 
+    pdf.close()
     return {"session_id": session_id, "images": urls}
 
 @app.get("/download/{session_id}/{filename}")
