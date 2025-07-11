@@ -15,7 +15,8 @@ def convert_from_bytes_pdfium(data: bytes, dpi: int = 200):
     """
     Convierte un PDF a una lista de objetos PIL.Image usando PDFium.
     """
-    pdf = pdfium.PdfDocument(data=data)
+    # <<< aquí cambiamos `data=` por `data_bytes=`
+    pdf = pdfium.PdfDocument(data_bytes=data)
     images = []
     scale = dpi / 72
     for page_index in range(len(pdf)):
@@ -36,19 +37,16 @@ def healthcheck():
 
 @app.post("/convert")
 async def convert_pdf(file: UploadFile = File(...)):
-    # Validación de extensión
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="El archivo debe ser PDF")
 
     content = await file.read()
 
-    # Convertimos con PDFium
     try:
         images = convert_from_bytes_pdfium(content, dpi=150)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al convertir PDF: {e}")
 
-    # Guardamos cada página
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(OUTPUT_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
@@ -59,7 +57,7 @@ async def convert_pdf(file: UploadFile = File(...)):
         path = os.path.join(session_dir, filename)
         img.save(path, "PNG")
         urls.append(f"/download/{session_id}/{filename}")
-        img.close()  # libera memoria
+        img.close()
 
     return {"session_id": session_id, "images": urls}
 
@@ -74,4 +72,3 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("app:app", host="0.0.0.0", port=port, workers=1)
-
