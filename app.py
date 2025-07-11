@@ -15,8 +15,8 @@ def convert_from_bytes_pdfium(data: bytes, dpi: int = 200):
     """
     Convierte un PDF a una lista de objetos PIL.Image usando PDFium.
     """
-    # <<< aquí cambiamos `data=` por `data_bytes=`
-    pdf = pdfium.PdfDocument(data_bytes=data)
+    # <<< CORRECCIÓN: pasar los bytes con file_bytes=
+    pdf = pdfium.PdfDocument(file_bytes=data)
     images = []
     scale = dpi / 72
     for page_index in range(len(pdf)):
