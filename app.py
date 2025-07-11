@@ -3,7 +3,6 @@ import uuid
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import FileResponse
 
-# Import básico de PIL y pdfium
 import pypdfium2 as pdfium
 from PIL import Image
 
@@ -15,11 +14,10 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 def convert_from_bytes_pdfium(data: bytes, dpi: int = 200):
     """
     Convierte un PDF a una lista de objetos PIL.Image usando PDFium.
-    dpi: resolución deseada; ajusta para calidad/tamaño.
     """
     pdf = pdfium.PdfDocument(data=data)
     images = []
-    scale = dpi / 72  # PDFium trabaja a 72 DPI base
+    scale = dpi / 72
     for page_index in range(len(pdf)):
         page = pdf.get_page(page_index)
         pil_img: Image.Image = page.render_topil(
@@ -37,26 +35,32 @@ def healthcheck():
     return {"status": "ok"}
 
 @app.post("/convert")
-async def convert_pdf(…):
+async def convert_pdf(file: UploadFile = File(...)):
+    # Validación de extensión
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser PDF")
+
     content = await file.read()
-    pdf = pdfium.PdfDocument(data=content)
+
+    # Convertimos con PDFium
+    try:
+        images = convert_from_bytes_pdfium(content, dpi=150)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al convertir PDF: {e}")
+
+    # Guardamos cada página
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(OUTPUT_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
+
     urls = []
-
-    for i in range(len(pdf)):
-        page = pdf.get_page(i)
-        pil_img = page.render_topil(scale=150/72, anti_alias=True)
-        filename = f"page_{i+1}.png"
+    for i, img in enumerate(images, start=1):
+        filename = f"page_{i}.png"
         path = os.path.join(session_dir, filename)
-        pil_img.save(path, "PNG")
-        # liberamos todo inmediatamente
-        pil_img.close()
-        page.close()
+        img.save(path, "PNG")
         urls.append(f"/download/{session_id}/{filename}")
+        img.close()  # libera memoria
 
-    pdf.close()
     return {"session_id": session_id, "images": urls}
 
 @app.get("/download/{session_id}/{filename}")
@@ -70,3 +74,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("app:app", host="0.0.0.0", port=port, workers=1)
+
