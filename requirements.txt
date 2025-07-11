@@ -1,4 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 pypdfium2
-pillow
+Pillow
+python-multipart
