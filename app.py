@@ -1,13 +1,36 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from pdf2image import convert_from_bytes
 import os
 import uuid
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import FileResponse
+
+# Import básico de PIL y pdfium
+import pypdfium2 as pdfium
+from PIL import Image
 
 app = FastAPI()
 
 OUTPUT_DIR = "/data/output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+def convert_from_bytes_pdfium(data: bytes, dpi: int = 200):
+    """
+    Convierte un PDF a una lista de objetos PIL.Image usando PDFium.
+    dpi: resolución deseada; ajusta para calidad/tamaño.
+    """
+    pdf = pdfium.PdfDocument(data=data)
+    images = []
+    scale = dpi / 72  # PDFium trabaja a 72 DPI base
+    for page_index in range(len(pdf)):
+        page = pdf.get_page(page_index)
+        pil_img: Image.Image = page.render_topil(
+            scale=scale,
+            rotation=0,
+            anti_alias=True,
+        )
+        images.append(pil_img)
+        page.close()
+    pdf.close()
+    return images
 
 @app.get("/healthcheck")
 def healthcheck():
@@ -15,32 +38,40 @@ def healthcheck():
 
 @app.post("/convert")
 async def convert_pdf(file: UploadFile = File(...)):
-    if not file.filename.endswith(".pdf"):
+    # Validación sencilla de extensión
+    if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="El archivo debe ser PDF")
 
     content = await file.read()
-    images = convert_from_bytes(content)
+
+    # Convertimos con PDFium
+    try:
+        images = convert_from_bytes_pdfium(content, dpi=150)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al convertir PDF: {e}")
+
+    # Guardamos cada página
     session_id = str(uuid.uuid4())
-    session_dir = f"{OUTPUT_DIR}/{session_id}"
+    session_dir = os.path.join(OUTPUT_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
-    filenames = []
 
-    for i, img in enumerate(images):
-        path = f"{session_dir}/page_{i+1}.png"
-        img.save(path, "PNG")
-        filenames.append(f"/download/{session_id}/page_{i+1}.png")
+    urls = []
+    for i, img in enumerate(images, start=1):
+        filename = f"page_{i}.png"
+        path = os.path.join(session_dir, filename)
+        img.save(path, format="PNG")
+        urls.append(f"/download/{session_id}/{filename}")
 
-    return {"session_id": session_id, "images": filenames}
+    return {"session_id": session_id, "images": urls}
 
 @app.get("/download/{session_id}/{filename}")
 def download_image(session_id: str, filename: str):
-    file_path = f"{OUTPUT_DIR}/{session_id}/{filename}"
+    file_path = os.path.join(OUTPUT_DIR, session_id, filename)
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
     return FileResponse(file_path)
 
 if __name__ == "__main__":
     import uvicorn
-    # Leer el puerto que Render inyecta, o usar 8000 por defecto
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port)
+    uvicorn.run("app:app", host="0.0.0.0", port=port, workers=1)
