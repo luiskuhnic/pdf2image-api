@@ -11,42 +11,27 @@ app = FastAPI()
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "/tmp/output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-def convert_from_bytes_pdfium(data: bytes, dpi: int = 200):
-    """
-    Convierte un PDF (bytes) a una lista de objetos PIL.Image usando PDFium.
-    """
-    # PASAMOS los bytes posicionalmente (o bien: PdfDocument(input_data=data))
-    pdf = pdfium.PdfDocument(data)  
-    images = []
-    scale = dpi / 72
-    for page_index in range(len(pdf)):
-        page = pdf.get_page(page_index)
-        pil_img: Image.Image = page.render_topil(
-            scale=scale,
-            rotation=0,
-            anti_alias=True,
-        )
-        images.append(pil_img)
-        page.close()
-    pdf.close()
-    return images
-
 @app.get("/healthcheck")
 def healthcheck():
     return {"status": "ok"}
 
 @app.post("/convert")
 async def convert_pdf(file: UploadFile = File(...)):
+    # Validación de extensión
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="El archivo debe ser PDF")
 
     content = await file.read()
 
+    # Convertimos con PDFium usando la función de alto nivel
     try:
-        images = convert_from_bytes_pdfium(content, dpi=150)
+        scale = 150 / 72  # 150 DPI
+        # Aquí pasas el contenido como primer argumento posicional:
+        images = pdfium.render_topil(content, scale=scale, rotation=0, anti_alias=True)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al convertir PDF: {e}")
 
+    # Guardamos cada página en disco
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(OUTPUT_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
@@ -71,4 +56,4 @@ def download_image(session_id: str, filename: str):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port, workers=1)
+    uvicorn.run("app:app", host="0.0.0.0", port=port)
